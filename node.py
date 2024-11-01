@@ -1,5 +1,6 @@
 import socket
 import threading
+from frame import Frame
 
 class Node:
     def __init__(self, node_id, switch_host, switch_port):

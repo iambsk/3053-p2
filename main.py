@@ -25,13 +25,11 @@ def main():
     node_threads = []
     for node_id in range(1, num_nodes + 1):
         node = Node(node_id, 'localhost', hub_port)
-        node_thread = threading.Thread(target=node.connect_to_switch)
+        node.connect_to_switch()
+        node_thread = threading.Thread(target=node.receive_data)
         node_thread.start()
         node_threads.append(node_thread)
         nodes.append(node)
-
-    for node_thread in node_threads:
-        node_thread.join()
 
     # Start transmission
     send_threads = []
@@ -40,10 +38,15 @@ def main():
         send_thread.start()
         send_threads.append(send_thread)
 
+    # Wait for all send threads to finish before joining receive threads
     for send_thread in send_threads:
         send_thread.join()
 
-    print("All nodes have fnished sending data.")
+    # close all node_threads
+    for node_thread in node_threads:
+        node_thread.join()
+
+    print("All nodes have finished sending data.")
 
 if __name__ == "__main__":
     main()

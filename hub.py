@@ -8,25 +8,32 @@ from frame import Frame
 BUFFER_SIZE = 1024
 
 class Hub:
-	def __init__(self, port: int = 8000):
+	def __init__(self, port: int = 8000, backbone_socket=None):
 		self.port = port
-		self.frame_buffer: list[Frame] = []
-		# switch table is a dictionary that maps the destination port to the address and socket
-		self.switch_table: dict[int, tuple[any, socket.socket]] = {}
+		self.switch_table = {}  # Maps node ID to (address, socket)
+		self.backbone_socket = backbone_socket  # Connection to the backbone
 		self.lock = threading.Lock()
-		with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as server_socket:
-			server_socket.bind(('localhost', self.port))
-			server_socket.listen(5)
-			print(f"Switch listening on port {self.port}")
-			while True:
-				try:
-					# addr is a tuple of (address, port)
-					client_socket, addr = server_socket.accept()
-					self.switch_table[addr[1]] = (addr[0], client_socket)
-					print(f"Connection from {addr}")
-					threading.Thread(target=self.handle_node, args=(client_socket, addr)).start()
-				except socket.error:
-					break
+
+		self.server_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+		self.server_socket.settimeout(2)  # Set timeout to avoid indefinite blocking
+		self.server_socket.bind(('localhost', self.port))
+		self.server_socket.listen(5)
+		print(f"Switch listening on port {self.port}")
+	
+	def start(self):
+		threading.Thread(target=self.accept_connections).start()
+
+	def accept_connections(self):
+		while True:
+			try:
+				client_socket, addr = self.server_socket.accept()
+				print(f"Accepted connection from {addr} on switch port {self.port}")
+				threading.Thread(target=self.handle_node, args=(client_socket, addr)).start()
+			except Exception as e:
+				if "timed out" in str(e):
+					pass
+				else:
+					print(f"Error accepting connection: {e}")
 
 	def handle_node(self, client_socket, addr):
 		print(f"Node connected from {addr}. Starting communication.")

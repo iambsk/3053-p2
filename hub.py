@@ -14,23 +14,25 @@ class Hub:
         self.frame_buffers = {}
         # switch table is a dictionary that maps the destination port to the address and socket
         self.switch_table: dict[int, tuple[any, socket.socket]] = {}
-        self.lock = threading.Lock()
-        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as server_socket:
-            server_socket.bind(('localhost', self.port))
-            server_socket.listen(5)
-            print(f"Switch listening on port {self.port}")
-            while True:
-                try:
-                    # addr is a tuple of (address, port)
-                    client_socket, addr = server_socket.accept()
-                    self.switch_table[addr[1]] = (addr[0], client_socket)
-                    # Initialize buffer for new client
-                    self.frame_buffers[addr[1]] = b''
-                    print(f"Connection from {addr}")
-                    threading.Thread(target=self.handle_node, args=(client_socket, addr)).start()
-                except socket.error:
-                    break
-
+        self.lock = threading.RLock()
+        self.server_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        self.server_socket.bind(('localhost', self.port))
+        self.server_socket.listen(5)
+        print(f"Switch listening on port {self.port}")
+        self.accept_connections()
+        
+    def accept_connections(self):
+        while True:
+            try:
+                # addr is a tuple of (address, port)
+                client_socket, addr = self.server_socket.accept()
+                self.switch_table[addr[1]] = (addr[0], client_socket)
+                # Initialize buffer for new client
+                self.frame_buffers[addr[1]] = b''
+                print(f"Connection from {addr}")
+                threading.Thread(target=self.handle_node, args=(client_socket, addr)).start()
+            except socket.error:
+                break
     def handle_node(self, client_socket, addr):
         print(f"Node connected from {addr}. Starting communication.")
         # Handle node communication

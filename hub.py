@@ -11,11 +11,11 @@ class Hub:
 	def __init__(self, port: int = 8000, backbone_socket=None):
 		self.port = port
 		self.switch_table = {}  # Maps node ID to (address, socket)
-		self.backbone_socket = backbone_socket  # Connection to the backbone
+		self.backbone_socket = backbone_socket  
 		self.lock = threading.Lock()
 
 		self.server_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-		self.server_socket.settimeout(2)  # Set timeout to avoid indefinite blocking
+		self.server_socket.settimeout(2)  # give a timeout because it might block forever
 		self.server_socket.bind(('localhost', self.port))
 		self.server_socket.listen(5)
 		print(f"Switch listening on port {self.port}")
@@ -29,7 +29,7 @@ class Hub:
 				client_socket, addr = self.server_socket.accept()
 				print(f"Accepted connection from {addr} on switch port {self.port}")
 				threading.Thread(target=self.handle_node, args=(client_socket, addr)).start()
-			except Exception as e:
+			except Exception as e: # could get the correct exception but this is good enough
 				if "timed out" in str(e):
 					pass
 				else:
@@ -66,7 +66,7 @@ class Hub:
 				try:
 					self.switch_table[frame.dest][1].sendall(frame.to_bytes())
 					print(f"Successfully forwarded frame to Node {frame.dest}")
-				except (ConnectionResetError, BrokenPipeError) as e:
+				except (ConnectionResetError, BrokenPipeError) as e: 
 					print(f"Error forwarding to Node {frame.dest}: {e}")
 					del self.switch_table[frame.dest]  # Remove if disconnected
 					print(f"Node {frame.dest} removed from switch table due to disconnection.")
@@ -79,6 +79,7 @@ class Hub:
 							sock.sendall(frame.to_bytes())
 							print(f"Broadcasted frame to Node {port}")
 						except (ConnectionResetError, BrokenPipeError) as e:
+							# if error is due to disconnection, remove the node from the switch table
 							print(f"Broadcast error from Node {frame.src}: {e}")
-							del self.switch_table[port]  # Remove disconnected node
+							del self.switch_table[port]  # remove disconnected node
 							print(f"Node {port} removed from switch table due to disconnection.")

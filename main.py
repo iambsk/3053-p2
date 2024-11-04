@@ -42,7 +42,7 @@ def main():
             node_thread = threading.Thread(target=node.receive_data)
             node_thread.start()
             node_threads.append(node_thread)
-            time.sleep(0.5)  # Slight delay to stagger node connections
+            time.sleep(0.5)  # dont want all nodes to connect at the same time
     print("Starting transmission")
     # Start transmission
     send_threads = []

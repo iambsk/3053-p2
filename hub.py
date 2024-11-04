@@ -10,7 +10,7 @@ BUFFER_SIZE = 1024
 class Hub:
 	def __init__(self, port: int = 8000, backbone_socket=None):
 		self.port = port
-		self.switch_table = {}  # Maps node ID to (address, socket)
+		self.switch_table = {}  # Maps node port to (address, socket)
 		self.backbone_socket = backbone_socket  
 		self.lock = threading.Lock()
 

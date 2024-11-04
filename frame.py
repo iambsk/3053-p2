@@ -11,6 +11,9 @@ class Frame:
     def to_bytes(self):
         frame = f"{self.src},{self.dest},{int(self.ack)},{self.data},{int(self.priority)}{self.DELIMITER}"
         return frame.encode()
+    
+    def is_ack(self):
+        return self.ack
 
     @classmethod
     def from_bytes(cls, frame_data):

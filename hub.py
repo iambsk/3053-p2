@@ -39,7 +39,7 @@ class Hub:
                 frame_bytes = client_socket.recv(BUFFER_SIZE)
                 if not frame_bytes:
                     print(f"Connection closed by Node {addr}.")
-                    # Clean up the buffer since they disconnected
+                    # clean up the buffer since they disconnected
                     with self.lock:
                         if addr[1] in self.frame_buffers:
                             del self.frame_buffers[addr[1]]
@@ -122,5 +122,5 @@ class Hub:
                             print(f"Broadcasted frame to Node {port}")
                         except (ConnectionResetError, BrokenPipeError) as e:
                             print(f"Broadcast error from Node {frame.src}: {e}")
-                            del self.switch_table[port]  # Remove disconnected node
+                            del self.switch_table[port]  # remove disconnected node
                             print(f"Node {port} removed from switch table due to disconnection.")

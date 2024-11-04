@@ -32,7 +32,7 @@ def main():
     # Connect each node
     nodes = []
     node_threads = []
-    nodes_per_switch = 3  # Number of nodes per switch
+    nodes_per_switch = num_nodes // len(switches)  # Number of nodes per switch
     for i, switch in enumerate(switches):
         for j in range(nodes_per_switch):
             node_id = i * nodes_per_switch + j + 1

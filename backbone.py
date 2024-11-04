@@ -11,38 +11,66 @@ BUFFER_SIZE = 1024
 class BackboneHub(Hub):
     def __init__(self, port: int = 8001):
         self.port = port
-        self.frame_buffer: list[Frame] = []
+        self.frame_buffers = {}
         # switch table is a dictionary that maps the destination port to the address and socket
         self.switch_table: dict[int, tuple[any, socket.socket]] = {}
-        self.lock = threading.Lock()
+        self.lock = threading.RLock()
         self.backbone_socket = None
-        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as server_socket:
-            server_socket.bind(('localhost', self.port))
-            server_socket.listen(5)
-            print(f"Switch listening on port {self.port}")
-            while True:
-                try:
-                    # addr is a tuple of (address, port)
-                    client_socket, addr = server_socket.accept()
-                    self.switch_table[addr[1]] = (addr[0], client_socket)
-                    print(f"Connection from {addr}")
-                    threading.Thread(target=self.handle_node, args=(client_socket, addr)).start()
-                except socket.error:
-                    break
+        self.switches = []  # switches connected
+        
+        self.server_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        self.server_socket.bind(('localhost', self.port))
+        self.server_socket.listen(5)
+        print(f"Switch listening on port {self.port}")
+        
+        threading.Thread(target=self.accept_connections).start()
         self.switches = []  # the switches connected
 
     def accept_connections(self):
         while True:
-            switch_socket, _ = self.server_socket.accept()
+            switch_socket, addr = self.server_socket.accept()
             self.switches.append(switch_socket)
-            threading.Thread(target=self.handle_switch, args=(switch_socket,)).start()
+            threading.Thread(target=self.handle_switch, args=(switch_socket, addr)).start()
 
-    def handle_switch(self, switch_socket):
+    def handle_switch(self, switch_socket, addr):
         while True:
-            frame_bytes = switch_socket.recv(BUFFER_SIZE)
-            if not frame_bytes:
+            try:
+                frame_bytes = switch_socket.recv(BUFFER_SIZE)
+                if not frame_bytes:
+                    print(f"Connection closed by switch at {addr}")
+                    if addr[1] in self.frame_buffers:
+                        del self.frame_buffers[addr[1]]
+                    if switch_socket in self.switches:
+                        self.switches.remove(switch_socket)
+                    break
+
+                with self.lock:
+                    if addr[1] not in self.frame_buffers:
+                        self.frame_buffers[addr[1]] = b''
+                    self.frame_buffers[addr[1]] += frame_bytes
+                    buffer = self.frame_buffers[addr[1]]    
+                    while Frame.DELIMITER.encode() in buffer:
+                        frame_data, remaining = buffer.split(Frame.DELIMITER.encode(), 1)
+                        if frame_data:  
+                            frame = Frame.from_bytes(frame_data)
+                            print(f"Backbone received frame from switch at {addr}")
+                            for socket in self.switches:
+                                if socket != switch_socket:
+                                    try:
+                                        socket.sendall(frame.to_bytes())
+                                        print(f"Forwarded frame to switch")
+                                    except (ConnectionResetError, BrokenPipeError) as e:
+                                        print(f"Error forwarding to switch: {e}")
+                                        if socket in self.switches:
+                                            self.switches.remove(socket)
+                        buffer = remaining
+                    self.frame_buffers[addr[1]] = buffer
+
+            except Exception as e:
+                print(f"Error in handle_switch: {e}")
+                traceback.print_exc()
+                if addr[1] in self.frame_buffers:
+                    del self.frame_buffers[addr[1]]
+                if switch_socket in self.switches:
+                    self.switches.remove(switch_socket)
                 break
-            frame = Frame.from_bytes(frame_bytes)
-            for socket in self.switches:
-                if socket != switch_socket:
-                    socket.sendall(frame.to_bytes())

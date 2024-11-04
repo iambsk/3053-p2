@@ -1,5 +1,5 @@
 class Frame:
-    DELIMITER = "|"
+    DELIMITER = "|" # separator between other frames if sent as a single string
 
     def __init__(self, src, dest, ack=False, data=""):
         self.src = src

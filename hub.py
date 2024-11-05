@@ -14,22 +14,25 @@ class Hub:
         self.frame_buffers = {}
         # switch table is a dictionary that maps the destination port to the address and socket
         self.switch_table: dict[int, tuple[any, socket.socket]] = {}
-        self.lock = threading.Lock()
-        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as server_socket:
-            server_socket.bind(('localhost', self.port))
-            server_socket.listen(5)
-            print(f"Switch listening on port {self.port}")
-            while True:
-                try:
-                    # addr is a tuple of (address, port)
-                    client_socket, addr = server_socket.accept()
-                    self.switch_table[addr[1]] = (addr[0], client_socket)
-                    # Initialize buffer for new client
-                    self.frame_buffers[addr[1]] = b''
-                    print(f"Connection from {addr}")
-                    threading.Thread(target=self.handle_node, args=(client_socket, addr)).start()
-                except socket.error:
-                    break
+        self.lock = threading.RLock()
+        self.server_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        self.server_socket.bind(('localhost', self.port))
+        self.server_socket.listen(5)
+        print(f"Switch listening on port {self.port}")
+        self.accept_connections()
+        
+    def accept_connections(self):
+        while True:
+            try:
+                # addr is a tuple of (address, port)
+                client_socket, addr = self.server_socket.accept()
+                self.switch_table[addr[1]] = (addr, client_socket)
+                # Initialize buffer for new client
+                self.frame_buffers[addr[1]] = b''
+                print(f"Connection from {addr}")
+                threading.Thread(target=self.handle_node, args=(client_socket, addr)).start()
+            except socket.error:
+                break
 
     def handle_node(self, client_socket, addr):
         print(f"Node connected from {addr}. Starting communication.")
@@ -44,50 +47,39 @@ class Hub:
                         if addr[1] in self.frame_buffers:
                             del self.frame_buffers[addr[1]]
                     break
-
-                # Add all the new frames to the buffer
+                
+                # add all the new frames to the buffer
                 with self.lock:
-                    # Add to the frame buffer for a specific address
+                    # add to the frame buffer for a specific address
                     self.frame_buffers[addr[1]] += frame_bytes
                     buffer = self.frame_buffers[addr[1]]
-
-                    # Process frames in buffer
+                    frames = []
                     while Frame.DELIMITER.encode() in buffer:
                         # Split the buffer at the first delimiter
+                        # frame_data is the first frame
+                        # remaining is the rest of the buffer
                         frame_data, remaining = buffer.split(Frame.DELIMITER.encode(), 1)
-                        if frame_data:
+                        if frame_data:  
                             frame = Frame.from_bytes(frame_data)
-                            print(f"Received frame from Node {frame.src} to Node {frame.dest} with priority {frame.priority}.")
-
-                            # Update switch table if source is new
-                            if frame.src not in [i[0] for i in self.switch_table.values()]:
-                                self.switch_table[frame.src] = (addr, client_socket)
-                                print(f"Node {frame.src} added to switch table.")
-
-                            # Forward high-priority frames immediately, otherwise add to buffer
-                            if frame.priority:
-                                self.forward_frame(frame, addr)  # Forward high-priority frames directly
-                            else:
-                                self.frame_buffers[addr[1]] += frame.to_bytes()  # Add low-priority frames back to the buffer
-
-                        # Update buffer with any remaining data
+                            frames.append(frame)
                         buffer = remaining
+                    self.frame_buffers[addr[1]] = buffer
 
-                    # Reorder buffer to prioritize high-priority frames
-                    priority_frames = []
-                    non_priority_frames = []
-
-                    # Separate high-priority and non-priority frames
-                    for frame_data in self.frame_buffers[addr[1]].split(Frame.DELIMITER.encode()):
-                        if frame_data:
-                            frame = Frame.from_bytes(frame_data)
-                            if frame.priority:
-                                priority_frames.append(frame_data)
-                            else:
-                                non_priority_frames.append(frame_data)
-
-                    # Reorder buffer to have high-priority frames first
-                    self.frame_buffers[addr[1]] = b''.join(priority_frames + non_priority_frames)
+                    # sort frames by priority (1 = high priority, 0 = normal priority)
+                    # Store original order for comparison
+                    original_order = frames.copy()
+                    frames.sort(key=lambda f: f.priority, reverse=True)
+                    if original_order != frames:
+                        print("======= Frame order changed after priority sorting")
+                    # Process frames in priority order
+                    for frame in frames:
+                        print(f"Received frame from Node {frame.src} to Node {frame.dest} with priority {frame.priority}.")
+                        if frame.src not in self.switch_table:
+                            if addr[1] in self.switch_table:
+                                del self.switch_table[addr[1]]
+                            self.switch_table[frame.src] = (addr, client_socket)
+                            print(f"Node {frame.src} added to switch table.")
+                        self.forward_frame(frame, addr)
 
             except Exception as e:
                 print(f"Error in handle_node: {e}")
@@ -99,7 +91,7 @@ class Hub:
                 break
 
     def forward_frame(self, frame, addr):
-        print(f"Forwarding frame from Node {frame.src} to Node {frame.dest}")
+        print(f"Forwarding frame from Node {frame.src} to Node {frame.dest} with priority {frame.priority}")
         with self.lock:
             if frame.is_ack():
                 print(f"Received ACK frame from Node {frame.src} to Node {frame.dest}")
@@ -110,17 +102,17 @@ class Hub:
                     print(f"Successfully forwarded frame to Node {frame.dest}")
                 except (ConnectionResetError, BrokenPipeError) as e:
                     print(f"Error forwarding to Node {frame.dest}: {e}")
-                    del self.switch_table[frame.dest]  # Remove if disconnected
+                    del self.switch_table[frame.dest]  # remove if disconnected
                     print(f"Node {frame.dest} removed from switch table due to disconnection.")
             else:
-                # Broadcast the frame to all other nodes except the sender
-                print(f"Broadcasting frame from Node {frame.src} to all other nodes except Node {addr[1]}")
-                for port, (_, sock) in self.switch_table.items():
-                    if port != addr[1]: 
+                # broadcast the frame to all other nodes except the sender
+                print(f"Broadcasting frame from Node {frame.src} to all other nodes except Node with port {addr[1]}")
+                for id, (node_addr, sock) in self.switch_table.items():
+                    if node_addr != addr: 
                         try:
                             sock.sendall(frame.to_bytes())
-                            print(f"Broadcasted frame to Node {port}")
+                            print(f"Broadcasted frame to Node {node_addr}")
                         except (ConnectionResetError, BrokenPipeError) as e:
                             print(f"Broadcast error from Node {frame.src}: {e}")
-                            del self.switch_table[port]  # remove disconnected node
-                            print(f"Node {port} removed from switch table due to disconnection.")
+                            del self.switch_table[id]  # remove disconnected node
+                            print(f"Node {id} removed from switch table due to disconnection.")

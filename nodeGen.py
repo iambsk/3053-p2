@@ -5,8 +5,9 @@ def generate_files(x):
         with open(f"node{i}.txt", "w") as file:
             for j in range(1, x + 1):
                 if i != j:  # Exclude itself
-                    file.write(f"{j}: {i} to {j}\n")
-
+                    # Add priority 1 for every third message
+                    priority = 1 if (i + j) % 3 == 0 else 0
+                    file.write(f"{j}: {i} to {j} // {priority}\n")
 if __name__ == "__main__":
     if len(sys.argv) != 2:
         print("Usage: python nodeGen.py <x>")

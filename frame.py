@@ -19,6 +19,11 @@ class Frame:
     def from_bytes(cls, frame_data):
         frame_str = frame_data.decode()
         src, dest, ack, data, priority = frame_str.split(",", 4)
+        print(f"Frame details:")
+        print(f"  Source: Node {src}")
+        print(f"  Destination: Node {dest}")
+        print(f"  Priority: {priority}")
+        print(f"  Data: {data}")
         ack = bool(int(ack))
         priority = bool(int(priority.rstrip(cls.DELIMITER)))
         return cls(int(src), int(dest), ack, data, priority)

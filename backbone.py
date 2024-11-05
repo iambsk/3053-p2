@@ -15,7 +15,6 @@ class BackboneHub(Hub):
         # switch table is a dictionary that maps the destination port to the address and socket
         self.switch_table: dict[int, tuple[any, socket.socket]] = {}
         self.lock = threading.RLock()
-        self.backbone_socket = None
         self.switches = []  # switches connected
         
         self.server_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
@@ -24,7 +23,6 @@ class BackboneHub(Hub):
         print(f"Switch listening on port {self.port}")
         
         threading.Thread(target=self.accept_connections).start()
-        self.switches = []  # the switches connected
 
     def accept_connections(self):
         while True:
@@ -44,27 +42,26 @@ class BackboneHub(Hub):
                         self.switches.remove(switch_socket)
                     break
 
-                with self.lock:
-                    if addr[1] not in self.frame_buffers:
-                        self.frame_buffers[addr[1]] = b''
-                    self.frame_buffers[addr[1]] += frame_bytes
-                    buffer = self.frame_buffers[addr[1]]    
-                    while Frame.DELIMITER.encode() in buffer:
-                        frame_data, remaining = buffer.split(Frame.DELIMITER.encode(), 1)
-                        if frame_data:  
-                            frame = Frame.from_bytes(frame_data)
-                            print(f"Backbone received frame from switch at {addr}")
-                            for socket in self.switches:
-                                if socket != switch_socket:
-                                    try:
-                                        socket.sendall(frame.to_bytes())
-                                        print(f"Forwarded frame to switch")
-                                    except (ConnectionResetError, BrokenPipeError) as e:
-                                        print(f"Error forwarding to switch: {e}")
-                                        if socket in self.switches:
-                                            self.switches.remove(socket)
-                        buffer = remaining
-                    self.frame_buffers[addr[1]] = buffer
+                if addr[1] not in self.frame_buffers:
+                    self.frame_buffers[addr[1]] = b''
+                self.frame_buffers[addr[1]] += frame_bytes
+                buffer = self.frame_buffers[addr[1]]    
+                while Frame.DELIMITER.encode() in buffer:
+                    frame_data, remaining = buffer.split(Frame.DELIMITER.encode(), 1)
+                    if frame_data:  
+                        frame = Frame.from_bytes(frame_data)
+                        print(f"Backbone received frame from switch at {addr}")
+                        for socket in self.switches:
+                            if socket != switch_socket:
+                                try:
+                                    socket.sendall(frame.to_bytes())
+                                    print(f"Forwarded frame to switch")
+                                except (ConnectionResetError, BrokenPipeError) as e:
+                                    print(f"Error forwarding to switch: {e}")
+                                    if socket in self.switches:
+                                        self.switches.remove(socket)
+                    buffer = remaining
+                self.frame_buffers[addr[1]] = buffer
 
             except Exception as e:
                 print(f"Error in handle_switch: {e}")

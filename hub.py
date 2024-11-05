@@ -23,6 +23,27 @@ class Hub:
 	
 	def start(self):
 		threading.Thread(target=self.accept_connections).start()
+		if self.backbone_socket:
+			threading.Thread(target=self.handle_backbone).start()
+   
+	def handle_backbone(self):
+		while True:
+			try:
+				frame_bytes = self.backbone_socket.recv(BUFFER_SIZE)
+				if frame_bytes:
+					with self.lock:
+						buffer = frame_bytes
+						while Frame.DELIMITER.encode() in buffer:
+							frame_data, remaining = buffer.split(Frame.DELIMITER.encode(), 1)
+							if frame_data:
+								frame = Frame.from_bytes(frame_data)
+								print(f"Received frame from backbone to Node {frame.dest}")
+								self.forward_frame(frame, ['localhost', 9999])  # None since it's from backbone
+							buffer = remaining
+			except Exception as e:
+				traceback.print_exc()
+				print(f"Error receiving from backbone: {e}")
+				break
 
 	def accept_connections(self):
 		while True:
@@ -37,7 +58,10 @@ class Hub:
 					print(f"Error accepting connection: {e}")
 
 	def handle_node(self, client_socket, addr):
-		# print(f"Node connected from {addr}. Starting communication.")
+		# add the node to the switch table before starting the communication so that other threads can use it even if its just temporary
+		with self.lock:
+			self.switch_table[addr[1]] = (addr, client_socket)
+     	# print(f"Node connected from {addr}. Starting communication.")
 		# Handle node communication
 		while True:
 			try:
@@ -65,7 +89,9 @@ class Hub:
 						if frame_data:  
 							frame = Frame.from_bytes(frame_data)
 							# print(f"Received frame from Node {frame.src} to Node {frame.dest}.")
-							if frame.src not in [i[0] for i in self.switch_table.values()]:
+							if frame.src not in self.switch_table:
+								if addr[1] in self.switch_table:
+									del self.switch_table[addr[1]]
 								self.switch_table[frame.src] = (addr, client_socket)
 								# print(f"Node {frame.src} added to switch table.")
 							self.forward_frame(frame, addr)
@@ -98,14 +124,23 @@ class Hub:
 					print(f"Node {frame.dest} removed from switch table due to disconnection.")
 			else:
 				# broadcast the frame to all other nodes except the sender
-				print(f"Broadcasting frame from Node {frame.src} to all other nodes except Node {addr[1]}")
-				for node_id, (_, sock) in self.switch_table.items():
-					if node_id != addr[1]: 
+				print(f"Broadcasting frame from Node {frame.src} to all other nodes except Node with port {addr[1]}")
+				
+				# Send to backbone switch first if it's not from the backbone switch
+				if addr != ['localhost', 9999]:
+					try:
+						self.backbone_socket.sendall(frame.to_bytes())
+						print(f"Sent frame to backbone switch")
+					except (ConnectionResetError, BrokenPipeError) as e:
+						print(f"Error sending to backbone switch: {e}")
+				
+				# Then broadcast to local nodes
+				for id, (node_addr, sock) in self.switch_table.items():
+					if node_addr != addr:
 						try:
 							sock.sendall(frame.to_bytes())
-							# print(f"Broadcasted frame to Node {node_id}")
+							print(f"Broadcasted frame to Node {node_addr}")
 						except (ConnectionResetError, BrokenPipeError) as e:
-							# if error is due to disconnection, remove the node from the switch table
 							print(f"Broadcast error from Node {frame.src}: {e}")
-							del self.switch_table[node_id]  # remove disconnected node
-							print(f"Node {node_id} removed from switch table due to disconnection.")
+							del self.switch_table[id]  # remove disconnected node
+							print(f"Node {id} removed from switch table due to disconnection.")

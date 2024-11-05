@@ -32,6 +32,7 @@ class Node:
     def receive_data(self):
         buffer = ""
         while True:
+            print(buffer)
             try:
                 frame_data = self.socket.recv(1024)
                 if not frame_data:
@@ -49,7 +50,8 @@ class Node:
                             self.write_output(frame.src, frame.data)
                             # Send ACK back to source
                             ack_frame = Frame(src=self.node_id, dest=frame.src, ack=True)
-                            self.socket.sendall(ack_frame.to_bytes())
+                            with self.lock:
+                                self.socket.sendall(ack_frame.to_bytes())
             except Exception as e:
                 print(f"Error receiving data for Node {self.node_id}: {e}")
                 break
@@ -58,8 +60,9 @@ class Node:
     def read_input_and_send(self):
         with open(self.input_file, 'r') as file:
             for line in file:
-                dest_id, data = line.strip().split(': ')
-                self.send_data(int(dest_id), data)
+                if line.strip():    
+                    dest_id, data = line.strip().split(': ')
+                    self.send_data(int(dest_id), data)
 
     def write_output(self, src_id, data):
         with open(self.output_file, 'a') as file:

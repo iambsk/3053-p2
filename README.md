@@ -16,6 +16,7 @@ nodeGen.py: Generates the input and output files for the nodes.
 node.py: The node class, which contains the logic for the nodes.
 hub.py: The switch class, which contains the logic for the switch.
 frame.py: The frame class, which contains the logic for the frames.
+backbone.py: This is the file that creates a backbone for the star structure.
 
 ## Frame Specification
 

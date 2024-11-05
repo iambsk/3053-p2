@@ -14,23 +14,25 @@ class Hub:
         self.frame_buffers = {}
         # switch table is a dictionary that maps the destination port to the address and socket
         self.switch_table: dict[int, tuple[any, socket.socket]] = {}
-        self.lock = threading.Lock()
-        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as server_socket:
-            server_socket.bind(('localhost', self.port))
-            server_socket.listen(5)
-            print(f"Switch listening on port {self.port}")
-            while True:
-                try:
-                    # addr is a tuple of (address, port)
-                    client_socket, addr = server_socket.accept()
-                    self.switch_table[addr[1]] = (addr[0], client_socket)
-                    # Initialize buffer for new client
-                    self.frame_buffers[addr[1]] = b''
-                    print(f"Connection from {addr}")
-                    threading.Thread(target=self.handle_node, args=(client_socket, addr)).start()
-                except socket.error:
-                    break
-
+        self.lock = threading.RLock()
+        self.server_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        self.server_socket.bind(('localhost', self.port))
+        self.server_socket.listen(5)
+        print(f"Switch listening on port {self.port}")
+        self.accept_connections()
+        
+    def accept_connections(self):
+        while True:
+            try:
+                # addr is a tuple of (address, port)
+                client_socket, addr = self.server_socket.accept()
+                self.switch_table[addr[1]] = (addr, client_socket)
+                # Initialize buffer for new client
+                self.frame_buffers[addr[1]] = b''
+                print(f"Connection from {addr}")
+                threading.Thread(target=self.handle_node, args=(client_socket, addr)).start()
+            except socket.error:
+                break
     def handle_node(self, client_socket, addr):
         print(f"Node connected from {addr}. Starting communication.")
         # Handle node communication
@@ -58,7 +60,9 @@ class Hub:
                         if frame_data:  
                             frame = Frame.from_bytes(frame_data)
                             print(f"Received frame from Node {frame.src} to Node {frame.dest}.")
-                            if frame.src not in [i[0] for i in self.switch_table.values()]:
+                            if frame.src not in self.switch_table:
+                                if addr[1] in self.switch_table:
+                                    del self.switch_table[addr[1]]
                                 self.switch_table[frame.src] = (addr, client_socket)
                                 print(f"Node {frame.src} added to switch table.")
                             self.forward_frame(frame, addr)
@@ -90,13 +94,13 @@ class Hub:
                     print(f"Node {frame.dest} removed from switch table due to disconnection.")
             else:
                 # broadcast the frame to all other nodes except the sender
-                print(f"Broadcasting frame from Node {frame.src} to all other nodes except Node {addr[1]}")
-                for port, (_, sock) in self.switch_table.items():
-                    if port != addr[1]: 
+                print(f"Broadcasting frame from Node {frame.src} to all other nodes except Node with port {addr[1]}")
+                for id, (node_addr, sock) in self.switch_table.items():
+                    if node_addr != addr: 
                         try:
                             sock.sendall(frame.to_bytes())
-                            print(f"Broadcasted frame to Node {port}")
+                            print(f"Broadcasted frame to Node {node_addr}")
                         except (ConnectionResetError, BrokenPipeError) as e:
                             print(f"Broadcast error from Node {frame.src}: {e}")
-                            del self.switch_table[port]  # remove disconnected node
-                            print(f"Node {port} removed from switch table due to disconnection.")
+                            del self.switch_table[id]  # remove disconnected node
+                            print(f"Node {id} removed from switch table due to disconnection.")
